@@ -7,6 +7,7 @@ from contextlib import nullcontext
 import torch
 import tiktoken
 from model import GPTConfig, GPT
+from debug import debug, set_debug_flag
 
 # -----------------------------------------------------------------------------
 init_from = 'resume' # either 'resume' (from an out_dir) or a gpt2 variant (e.g. 'gpt2-xl')
@@ -20,8 +21,14 @@ seed = 1337
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', etc.
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32' or 'bfloat16' or 'float16'
 compile = False # use PyTorch 2.0 to compile the model to be faster
+show_probs = False # use matplotlib to render charts of the top10 tokens
+show_total_probability = False # accumulate the total probability of the response.
+forced_response = "" # String that we want to force the model to return - takes the string and pretends it is what was selected.
+enable_debug = False
 exec(open('configurator.py').read()) # overrides from command line or config file
 # -----------------------------------------------------------------------------
+
+set_debug_flag(enable_debug)
 
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
@@ -66,12 +73,14 @@ if load_meta:
     stoi, itos = meta['stoi'], meta['itos']
     encode = lambda s: [stoi[c] for c in s]
     decode = lambda l: ''.join([itos[i] for i in l])
+    decode_bytes = None
 else:
     # ok let's assume gpt-2 encodings by default
     print("No meta.pkl found, assuming GPT-2 encodings...")
     enc = tiktoken.get_encoding("gpt2")
     encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
     decode = lambda l: enc.decode(l)
+    decode_bytes = lambda l: enc.decode_tokens_bytes(l)
 
 # encode the beginning of the prompt
 if start.startswith('FILE:'):
@@ -80,10 +89,30 @@ if start.startswith('FILE:'):
 start_ids = encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
+forced_response_ids = None
+if len(forced_response) > 0 :
+    # Tokens are <whitespace><text>, whitespace isn't independent. I guess this keeps " pod" separate from
+    # the "pod ".
+    # The configurator requires the types to match, and doesn't coerce string to values set to None.
+    # Sanity requires "non-presence" to be None, not default length. Convert it back.
+    forced_response_ids = (torch.tensor(encode(forced_response), dtype=torch.long, device=device)[None, ...])
+
+debug(f"forced_response = {forced_response_ids}")
+
 # run generation
 with torch.no_grad():
     with ctx:
         for k in range(num_samples):
-            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            y, accumulated_log_prob = model.generate(
+                x,
+                max_new_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                decode_bytes=decode_bytes,
+                show_probs=show_probs,
+                forced_response_ids=forced_response_ids)
             print(decode(y[0].tolist()))
+            if show_total_probability:
+                total_probability = torch.exp(accumulated_log_prob)
+                print(f"Total Probability: {total_probability[0,0]}")
             print('---------------')

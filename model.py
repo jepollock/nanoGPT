@@ -10,10 +10,13 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 import math
 import inspect
 from dataclasses import dataclass
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
+from mpmath import cholesky_solve, zeros
 from torch.nn import functional as F
+from debug import debug
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -303,13 +306,15 @@ class GPT(nn.Module):
         return mfu
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, decode_bytes=None, forced_response_ids=None, show_probs=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
-        for _ in range(max_new_tokens):
+        # Reverse the string.
+        accumulated_log_prob = torch.tensor(0)
+        for token_num in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
             # forward the model to get the logits for the index in the sequence
@@ -322,9 +327,54 @@ class GPT(nn.Module):
                 logits[logits < v[:, [-1]]] = -float('Inf')
             # apply softmax to convert logits to (normalized) probabilities
             probs = F.softmax(logits, dim=-1)
+
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)
+            if forced_response_ids is not None:
+                idx_next = forced_response_ids[:,0:1]
+                forced_response_ids = forced_response_ids[:,1:]
+
+            debug(f"idx_next: {idx_next}")
+            debug(f"idx_next: {decode_bytes((idx_next))}")
+
+            # Q 1.1 - bar chart.
+            if show_probs:
+                top_10, top_10_indices = torch.topk(probs, 10)
+                debug(f"top_10: {top_10}, {top_10_indices}")
+                plot_probs(decode_bytes=decode_bytes, Y=top_10, indices=top_10_indices, chosen_index=idx_next, suffix=token_num)
+
+            debug(f"probs.size = {probs.size()}")
+            selected_prob = probs[0,idx_next]
+            debug(f"selected_prob: {selected_prob}")
+            log_selected_prob = torch.log(selected_prob)
+            debug(f"log_selected_prob: {log_selected_prob}")
+            debug(f"before_accumulated: {accumulated_log_prob}")
+            accumulated_log_prob = torch.add(accumulated_log_prob, log_selected_prob)
+            debug(f"JASON: Accumulated log prob={accumulated_log_prob.tolist()}")
+
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
+        return (idx, accumulated_log_prob)
 
-        return idx
+def plot_probs(decode_bytes=None, filename="token_probability", Y=None, indices=None, chosen_index=None, suffix="x"):
+    title = f"GPT Token Probability Graph: {suffix}"
+    plt.figure(figsize=(10, 4))
+    plt.title(title)
+    plt.grid(True)
+    plt.tight_layout()
+    to_plot = Y[0].tolist()
+    debug(f"indices = {indices}")
+    X = decode_bytes(indices[0].tolist())
+    debug(f"X:{X}")
+    colours = ['black'] * len(to_plot)
+    index = (indices == chosen_index).nonzero(as_tuple=False)
+    if len(index) > 0:
+        colours[index[0,0]] = 'red'
+    debug(f"X = {X}")
+    debug(f"height= {to_plot}")
+    debug(f"colours= {colours}")
+    plt.bar(x=X, height=to_plot, color=colours)
+    debug(f"Saving file - {filename}")
+    plt.savefig(filename + f"_{suffix}" +  ".png")
+    plt.close()
+
