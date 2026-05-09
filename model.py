@@ -334,6 +334,8 @@ class GPT(nn.Module):
                 idx_next = forced_response_ids[:,0:1]
                 forced_response_ids = forced_response_ids[:,1:]
 
+            debug(f"remaining: {forced_response_ids.numel()}")
+            debug(f"forced_response_ids: {forced_response_ids}")
             debug(f"idx_next: {idx_next}")
             debug(f"idx_next: {decode_bytes((idx_next))}")
 
@@ -354,6 +356,8 @@ class GPT(nn.Module):
 
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
+            if forced_response_ids.numel() == 0:
+                break
         return (idx, accumulated_log_prob)
 
 def plot_probs(decode_bytes=None, filename="token_probability", Y=None, indices=None, chosen_index=None, suffix="x"):
