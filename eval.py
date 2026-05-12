@@ -4,6 +4,7 @@ Sample from a trained model
 import json
 import os
 import pickle
+import re
 from contextlib import nullcontext
 import torch
 import tiktoken
@@ -27,6 +28,8 @@ show_total_probability = True # accumulate the total probability of the response
 enable_debug = False
 eval_data_file = "eval_data.json"
 exec(open('configurator.py').read()) # overrides from command line or config file
+enable_response_prefix = False
+enable_stop_token = False
 # -----------------------------------------------------------------------------
 
 def to_encoded_tensor(x):
@@ -90,15 +93,24 @@ with open(eval_data_file, 'r') as file:
     eval_data = json.load(file)
 
 # run generation
+answer_correct=0
+calculator_present=0
+normalized_perplexity_total = torch.tensor(0)
+
+num_requests = 0
 with torch.no_grad():
     with ctx:
         for prompt_pair in eval_data:
-            prompt = prompt_pair["prompt"]
+            # Make sure the prompt always ends in whitespace. The model is _really_ picky about whitespace.
+            prompt = prompt_pair["prompt"] + " "
             response = prompt_pair["response"]
-            # Fix response - it always starts with a space.
-            # if not response.startswith(" "):
-            #     response = " " + response
-            debug(f"BEGIN {prompt} -> {response}")
+            if enable_response_prefix:
+                response = "\n        \"response\":\"" + response
+            else:
+                # Fix response - it always starts with a space.
+                if not response.startswith(" "):
+                    response = " " + response
+            print(f"BEGIN ***{prompt}***")
             x = to_encoded_tensor(prompt)
             forced_response_ids = to_encoded_tensor(response)
             debug(f"forced_response = {forced_response_ids}")
@@ -110,11 +122,34 @@ with torch.no_grad():
                     top_k=top_k,
                     decode_bytes=decode_bytes,
                     show_probs=show_probs,
+                    enable_stop_token=enable_stop_token,
+                    #forced_response_ids=None)
                     forced_response_ids=forced_response_ids)
-                print(decode(y[0].tolist()))
+                decoded = decode(y[0].tolist())
+                combined = "".join(decoded)
+                if prompt_pair["expected_value"] in combined:
+                    answer_correct += 1
+                    debug("correct answer")
+                else:
+                    debug("wrong answer!")
+                if re.search(r"<<.*>>", combined, flags=re.MULTILINE):
+                    calculator_present+=1
+                    print("Calculator Present")
+                else:
+                    debug("Calculator Not Present")
+                print("***"+decoded+"***")
+
+                normalized_perplexity_total = torch.add(torch.div(accumulated_log_prob, len(y[0])), normalized_perplexity_total)
+                num_requests+=1
                 if show_total_probability:
                     total_probability = torch.exp(accumulated_log_prob)
+                    print(f"Log Probability: {accumulated_log_prob[0,0]}")
                     print(f"Total Probability: {total_probability[0,0]}")
                 print('---------------')
-            debug(f"END {prompt} -> {response}")
+            debug(f"END {prompt}")
 
+perplexity_average = torch.div(normalized_perplexity_total, torch.tensor(num_requests))
+perplexity_average = torch.exp(perplexity_average)
+print(f"Average perplexity: {perplexity_average[0,0]}")
+print(f"P(Correct Answer Present): {answer_correct/num_requests}")
+print(f"P(Calculator Used): {calculator_present/num_requests}")

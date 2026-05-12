@@ -306,7 +306,15 @@ class GPT(nn.Module):
         return mfu
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, decode_bytes=None, forced_response_ids=None, show_probs=None):
+    def generate(self,
+                 idx,
+                 max_new_tokens,
+                 temperature=1.0,
+                 top_k=None,
+                 decode_bytes=None,
+                 enable_stop_token=False,
+                 forced_response_ids=None,
+                 show_probs=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -334,10 +342,10 @@ class GPT(nn.Module):
                 idx_next = forced_response_ids[:,0:1]
                 forced_response_ids = forced_response_ids[:,1:]
 
-            debug(f"remaining: {forced_response_ids.numel()}")
+            debug(f"remaining: {  forced_response_ids.numel() if forced_response_ids is not None else (max_new_tokens-token_num)}")
             debug(f"forced_response_ids: {forced_response_ids}")
             debug(f"idx_next: {idx_next}")
-            debug(f"idx_next: {decode_bytes((idx_next))}")
+            debug(f"idx_next: {decode_bytes(idx_next)}")
 
             # Q 1.1 - bar chart.
             if show_probs:
@@ -352,11 +360,21 @@ class GPT(nn.Module):
             debug(f"log_selected_prob: {log_selected_prob}")
             debug(f"before_accumulated: {accumulated_log_prob}")
             accumulated_log_prob = torch.add(accumulated_log_prob, log_selected_prob)
-            debug(f"JASON: Accumulated log prob={accumulated_log_prob.tolist()}")
+            debug(f"Accumulated log prob={accumulated_log_prob.tolist()}")
 
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
-            if forced_response_ids.numel() == 0:
+            if enable_stop_token:
+                # Detect a stop token.
+                # Encode request->response
+                # \n        "response": "
+                # Break on \n",
+                stop_check = decode_bytes(idx[0].tolist()[-3:])
+                debug(f"stop_check = {stop_check}")
+                if stop_check == [b'\\', b'n', b'",' ]:
+                    debug(f"stopping!")
+                    break
+            if forced_response_ids is not None and forced_response_ids.numel() == 0:
                 break
         return (idx, accumulated_log_prob)
 
