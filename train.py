@@ -121,6 +121,15 @@ def get_batch(split):
     else:
         data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
     ix = torch.randint(len(data) - block_size, (batch_size,))
+    # JASON:
+    # Load X, cast each uint16 to int64 - wait this is wrong?!? What happens with utf-8 strings?
+    # No, these are tokens, so assumes max 16bits of tokens == 64k tokens? Tiktoken handles them.
+    # tiktoken reserves 256 tokens for things that aren't properly fitting, so they can do all of it
+    # as a stream of tokens. However, dumping them 1 by 1 (like we do in the assignment will
+    # break internationally.
+    # Uses 64 bit to avoid overflowing on intermediate weight calculations, otherwise, it would need to be
+    # converted anyways.
+    # torch.stack assumes all tensors are the same length. How do we do batch inference then?
     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
     if device_type == 'cuda':
@@ -218,9 +227,13 @@ def estimate_loss():
     model.eval()
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
+        # JASON: evaluate eval_iters iterations, create random batches of size batch_size, stacked
+        # into X, Y.
         for k in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
+                # JASON: This is pytorch weirdness.
+                # https://medium.com/@ashishpandey2062/inside-pytorchs-nn-module-forward-pass-call-and-composition-482d9772c10c
                 logits, loss = model(X, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
