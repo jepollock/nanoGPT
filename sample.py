@@ -22,6 +22,7 @@ device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', etc.
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32' or 'bfloat16' or 'float16'
 compile = False # use PyTorch 2.0 to compile the model to be faster
 show_probs = False # use matplotlib to render charts of the top10 tokens
+image_filename = "token_probability" # Prefix used to name the image files.
 show_total_probability = False # accumulate the total probability of the response.
 forced_response = "" # String that we want to force the model to return - takes the string and pretends it is what was selected.
 enable_debug = False
@@ -110,6 +111,7 @@ with torch.no_grad():
                 top_k=top_k,
                 decode_bytes=decode_bytes,
                 show_probs=show_probs,
+                image_filename=image_filename,
                 forced_response_ids=forced_response_ids)
             print(decode(y[0].tolist()))
             if show_total_probability:
