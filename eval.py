@@ -24,12 +24,13 @@ device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', etc.
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32' or 'bfloat16' or 'float16'
 compile = False # use PyTorch 2.0 to compile the model to be faster
 show_probs = False # use matplotlib to render charts of the top10 tokens
-show_total_probability = True # accumulate the total probability of the response.
+show_total_probability = False # accumulate the total probability of the response.
 enable_debug = False
 eval_data_file = "eval_data.json"
-exec(open('configurator.py').read()) # overrides from command line or config file
-enable_response_prefix = False
+enable_response_start_token = False
 enable_stop_token = False
+use_eval_response = False
+exec(open('configurator.py').read()) # overrides from command line or config file
 # -----------------------------------------------------------------------------
 
 def to_encoded_tensor(x):
@@ -104,7 +105,7 @@ with torch.no_grad():
             # Make sure the prompt always ends in whitespace. The model is _really_ picky about whitespace.
             prompt = prompt_pair["prompt"] + " "
             response = prompt_pair["response"]
-            if enable_response_prefix:
+            if enable_response_start_token:
                 response = "\n        \"response\":\"" + response
             else:
                 # Fix response - it always starts with a space.
@@ -113,6 +114,9 @@ with torch.no_grad():
             print(f"BEGIN ***{prompt}***")
             x = to_encoded_tensor(prompt)
             forced_response_ids = to_encoded_tensor(response)
+            max_new_tokens = len(response)
+            if not use_eval_response:
+                forced_response_ids = None
             debug(f"forced_response = {forced_response_ids}")
             for k in range(num_samples):
                 y, accumulated_log_prob = model.generate(
@@ -123,7 +127,6 @@ with torch.no_grad():
                     decode_bytes=decode_bytes,
                     show_probs=show_probs,
                     enable_stop_token=enable_stop_token,
-                    #forced_response_ids=None)
                     forced_response_ids=forced_response_ids)
                 decoded = decode(y[0].tolist())
                 combined = "".join(decoded)
@@ -134,7 +137,7 @@ with torch.no_grad():
                     debug("wrong answer!")
                 if re.search(r"<<.*>>", combined, flags=re.MULTILINE):
                     calculator_present+=1
-                    print("Calculator Present")
+                    debug("Calculator Present")
                 else:
                     debug("Calculator Not Present")
                 print("***"+decoded+"***")
