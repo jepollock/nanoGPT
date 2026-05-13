@@ -314,6 +314,7 @@ class GPT(nn.Module):
                  decode_bytes=None,
                  enable_stop_token=False,
                  forced_response_ids=None,
+                 image_filename=None,
                  show_probs=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
@@ -342,16 +343,19 @@ class GPT(nn.Module):
                 idx_next = forced_response_ids[:,0:1]
                 forced_response_ids = forced_response_ids[:,1:]
 
-            debug(f"remaining: {  forced_response_ids.numel() if forced_response_ids is not None else (max_new_tokens-token_num)}")
-            debug(f"forced_response_ids: {forced_response_ids}")
-            debug(f"idx_next: {idx_next}")
-            debug(f"idx_next: {decode_bytes(idx_next)}")
+            # debug(f"remaining: {  forced_response_ids.numel() if forced_response_ids is not None else (max_new_tokens-token_num)}")
+            # debug(f"forced_response_ids: {forced_response_ids}")
+            # debug(f"idx_next: {idx_next}")
+            # debug(f"idx_next: {decode_bytes(idx_next)}")
 
             # Q 1.1 - bar chart.
             if show_probs:
                 top_10, top_10_indices = torch.topk(probs, 10)
                 debug(f"top_10: {top_10}, {top_10_indices}")
-                plot_probs(decode_bytes=decode_bytes, Y=top_10, indices=top_10_indices, chosen_index=idx_next, suffix=token_num)
+                plot_probs(decode_bytes=decode_bytes, Y=top_10, indices=top_10_indices, chosen_index=idx_next, filename=image_filename, suffix=token_num)
+            else:
+                top_10, top_10_indices = torch.topk(probs, 10)
+                debug(f"top_10: {top_10}, {top_10_indices}")
 
             debug(f"probs.size = {probs.size()}")
             selected_prob = probs[0,idx_next]
@@ -370,9 +374,9 @@ class GPT(nn.Module):
                 # \n        "response": "
                 # Break on \n",
                 stop_check = decode_bytes(idx[0].tolist()[-3:])
-                debug(f"stop_check = {stop_check}")
+                # debug(f"stop_check = {stop_check}")
                 if stop_check == [b'\\', b'n', b'",' ]:
-                    debug(f"stopping!")
+                    # debug(f"stopping!")
                     break
             if forced_response_ids is not None and forced_response_ids.numel() == 0:
                 break
@@ -385,18 +389,18 @@ def plot_probs(decode_bytes=None, filename="token_probability", Y=None, indices=
     plt.grid(True)
     plt.tight_layout()
     to_plot = Y[0].tolist()
-    debug(f"indices = {indices}")
+    # debug(f"indices = {indices}")
     X = decode_bytes(indices[0].tolist())
-    debug(f"X:{X}")
+    # debug(f"X:{X}")
     colours = ['black'] * len(to_plot)
     index = (indices == chosen_index).nonzero(as_tuple=False)
     if len(index) > 0:
         colours[index[0,0]] = 'red'
-    debug(f"X = {X}")
-    debug(f"height= {to_plot}")
-    debug(f"colours= {colours}")
+    # debug(f"X = {X}")
+    # debug(f"height= {to_plot}")
+    # debug(f"colours= {colours}")
     plt.bar(x=X, height=to_plot, color=colours)
-    debug(f"Saving file - {filename}")
+    # debug(f"Saving file - {filename}")
     plt.savefig(filename + f"_{suffix}" +  ".png")
     plt.close()
 
