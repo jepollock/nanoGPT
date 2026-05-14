@@ -227,13 +227,9 @@ def estimate_loss():
     model.eval()
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
-        # JASON: evaluate eval_iters iterations, create random batches of size batch_size, stacked
-        # into X, Y.
         for k in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
-                # JASON: This is pytorch weirdness.
-                # https://medium.com/@ashishpandey2062/inside-pytorchs-nn-module-forward-pass-call-and-composition-482d9772c10c
                 logits, loss = model(X, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()

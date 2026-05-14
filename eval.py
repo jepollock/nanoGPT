@@ -101,7 +101,7 @@ def eval(eval_data_file=None, ):
                 debug(f"END {prompt}")
 
     perplexity_average = torch.div(normalized_perplexity_total, torch.tensor(num_requests))
-    perplexity_average = torch.exp(perplexity_average)
+    perplexity_average = torch.exp(torch.neg(perplexity_average))
     print(f"Average perplexity: {perplexity_average[0, 0]}")
     print(f"P(Correct Answer Present): {answer_correct / num_requests}")
     print(f"P(Calculator Used): {calculator_present / num_requests}")

@@ -118,6 +118,11 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
+@dataclass
+class ActiveIdx:
+    accumulated_log_prob: torch.Tensor
+    idx: torch.Tensor
+
 class GPT(nn.Module):
 
     def __init__(self, config):
@@ -305,6 +310,7 @@ class GPT(nn.Module):
         mfu = flops_achieved / flops_promised
         return mfu
 
+
     @torch.no_grad()
     def generate(self,
                  idx,
@@ -315,71 +321,92 @@ class GPT(nn.Module):
                  enable_stop_token=False,
                  fixed_response_ids=None,
                  image_filename=None,
-                 show_probs=None):
+                 show_probs=None,
+                 beam_width=1):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
-        # Reverse the string.
+        # Beam Search:
+        # Need accum log prob per beam
+        # Need sorted list of log_prob -> idx
+        # Algorithm:
+        #  Take values => generate idx tokens for each
+        #  sample for beam_count, without replacement.
+        #  Update accum log prob
+        #  Put into potentials
+        #  Take best beam count log_probs (sort, last-n)
+        #  replace initial searches with best beams.
         accumulated_log_prob = torch.tensor(0)
+        initial_beam = ActiveIdx(accumulated_log_prob=torch.tensor(0), idx=idx)
+        # Treat this as if we're looping around from the bottom.
+        next_beams = (initial_beam)
+
         for token_num in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
-            # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = F.softmax(logits, dim=-1)
+            beams_to_expand = next_beams
+            next_beams = ()
+            for beam in beams_to_expand:
+                idx = beam.idx
+                accumulated_log_prob = beam.accumulated_log_prob
 
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
-            if fixed_response_ids is not None:
-                idx_next = fixed_response_ids[:, 0:1]
-                fixed_response_ids = fixed_response_ids[:, 1:]
+                # if the sequence context is growing too long we must crop it at block_size
+                idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
+                # forward the model to get the logits for the index in the sequence
+                logits, _ = self(idx_cond)
+                # pluck the logits at the final step and scale by desired temperature
+                logits = logits[:, -1, :] / temperature
+                # optionally crop the logits to only the top k options
+                if top_k is not None:
+                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                    logits[logits < v[:, [-1]]] = -float('Inf')
+                # apply softmax to convert logits to (normalized) probabilities
+                probs = F.softmax(logits, dim=-1)
 
-            # debug(f"remaining: {  forced_response_ids.numel() if forced_response_ids is not None else (max_new_tokens-token_num)}")
-            # debug(f"forced_response_ids: {forced_response_ids}")
-            # debug(f"idx_next: {idx_next}")
-            # debug(f"idx_next: {decode_bytes(idx_next)}")
+                # sample from the distribution, without replacement.
+                idx_next = torch.multinomial(probs, num_samples=beam_width)
+                if fixed_response_ids is not None:
+                    idx_next = fixed_response_ids[:, 0:1]
+                    fixed_response_ids = fixed_response_ids[:, 1:]
+                    debug(f"remaining: {  fixed_response_ids.numel() if fixed_response_ids is not None else (max_new_tokens-token_num)}")
+                    debug(f"forced_response_ids: {fixed_response_ids}")
 
-            # Q 1.1 - bar chart.
-            if show_probs:
-                top_10, top_10_indices = torch.topk(probs, 10)
-                debug(f"top_10: {top_10}, {top_10_indices}")
-                plot_probs(decode_bytes=decode_bytes, Y=top_10, indices=top_10_indices, chosen_index=idx_next, filename=image_filename, suffix=token_num)
-            else:
-                top_10, top_10_indices = torch.topk(probs, 10)
-                debug(f"top_10: {top_10}, {top_10_indices}")
+                debug(f"idx_next: {idx_next}")
+                debug(f"idx_next: {decode_bytes(idx_next)}")
 
-            debug(f"probs.size = {probs.size()}")
-            selected_prob = probs[0,idx_next]
-            debug(f"selected_prob: {selected_prob}")
-            log_selected_prob = torch.log(selected_prob)
-            debug(f"log_selected_prob: {log_selected_prob}")
-            debug(f"before_accumulated: {accumulated_log_prob}")
-            accumulated_log_prob = torch.add(accumulated_log_prob, log_selected_prob)
-            debug(f"Accumulated log prob={accumulated_log_prob.tolist()}")
+                # Q 1.1 - bar chart.
+                if show_probs:
+                    top_10, top_10_indices = torch.topk(probs, 10)
+                    debug(f"top_10: {top_10}, {top_10_indices}")
+                    plot_probs(decode_bytes=decode_bytes, Y=top_10, indices=top_10_indices, chosen_index=idx_next, filename=image_filename, suffix=token_num)
+                else:
+                    top_10, top_10_indices = torch.topk(probs, 10)
+                    debug(f"top_10: {top_10}, {top_10_indices}")
 
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
-            if enable_stop_token:
-                # Detect a stop token.
-                # Encode request->response
-                # \n        "response": "
-                # Break on \n",
-                stop_check = decode_bytes(idx[0].tolist()[-3:])
-                # debug(f"stop_check = {stop_check}")
-                if stop_check == [b'\\', b'n', b'",' ]:
-                    # debug(f"stopping!")
+                # Obtain the probability of the sampled token, and add to the log_probability
+                debug(f"probs.size = {probs.size()}")
+                selected_prob = probs[0,idx_next]
+                debug(f"selected_prob: {selected_prob}")
+                log_selected_prob = torch.log(selected_prob)
+                debug(f"log_selected_prob: {log_selected_prob}")
+                debug(f"before_accumulated: {accumulated_log_prob}")
+                accumulated_log_prob = torch.add(accumulated_log_prob, log_selected_prob)
+                debug(f"Accumulated log prob={accumulated_log_prob.tolist()}")
+
+                # append sampled index to the running sequence and continue
+                idx = torch.cat((idx, idx_next), dim=1)
+                if enable_stop_token:
+                    # Detect a stop token.
+                    # Encode request->response
+                    # \n        "response": "
+                    # Break on \n",
+                    stop_check = decode_bytes(idx[0].tolist()[-3:])
+                    # debug(f"stop_check = {stop_check}")
+                    if stop_check == [b'\\', b'n', b'",' ]:
+                        # debug(f"stopping!")
+                        break
+                if fixed_response_ids is not None and fixed_response_ids.numel() == 0:
                     break
-            if fixed_response_ids is not None and fixed_response_ids.numel() == 0:
-                break
         return (idx, accumulated_log_prob)
 
 def plot_probs(decode_bytes=None, filename="token_probability", Y=None, indices=None, chosen_index=None, suffix="x"):

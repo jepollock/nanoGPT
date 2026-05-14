@@ -30,6 +30,17 @@ task5_dataset:
 task6_prepare_dataset:
 	python data/gms8k/prepare.py
 
+task7_finetune:
+	python train.py config/finetune_gms8k.py --device=mps
+
+task8_eval_baseline:
+	python -u ./eval.py --top_k=50000 --show_total_probability=True --num_samples=1 --init_from=gpt2-large --device=mps --eval_data_file=test.json --use_eval_response=True | tee task8_baseline_fixed_response.txt
+	python -u ./eval.py --show_total_probability=True --num_samples=1 --init_from=gpt2-large --device=mps --eval_data_file=test.json --use_eval_response=False | tee task8_baseline_unfixed_response.txt
+
+task8_eval_finetune:
+	python -u ./eval.py --top_k=50000 --show_total_probability=True --num_samples=1 --init_from=resume --out_dir=out-gms8k --device=mps --eval_data_file=test.json --enable_response_start_token=True --enable_stop_token=True --use_eval_response=True | tee task8_finetune_fixed_response.txt
+	python -u ./eval.py --show_total_probability=True --num_samples=1 --init_from=resume --out_dir=out-gms8k --device=mps --eval_data_file=test.json --enable_response_start_token=True --enable_stop_token=True --use_eval_response=False | tee task8_finetune_unfixed_response.txt
+
 
 clean:
 	rm task1_example*.png
@@ -38,3 +49,5 @@ clean:
 	rm task4_*response.txt
 	rm test.json
 	rm data/gms8k/*.json
+	rm task8_baseline_*fixed_response.txt
+	rm task8_finetune_*fixed_response.txt

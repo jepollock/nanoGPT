@@ -26,10 +26,14 @@ image_filename = "token_probability" # Prefix used to name the image files.
 show_total_probability = False # accumulate the total probability of the response.
 fixed_response = "" # String that we want to force the model to return - takes the string and pretends it is what was selected.
 enable_debug = False
+beam_width = 1
 exec(open('configurator.py').read()) # overrides from command line or config file
 # -----------------------------------------------------------------------------
 
 set_debug_flag(enable_debug)
+# We require at least one of beam_count or fixed_response to not be used.
+# fixed_response and a beam search do not make sense together.
+assert(beam_width == 1 or len(fixed_response) == 0)
 
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
@@ -112,7 +116,8 @@ with torch.no_grad():
                 decode_bytes=decode_bytes,
                 show_probs=show_probs,
                 image_filename=image_filename,
-                fixed_response_ids=fixed_response_ids)
+                fixed_response_ids=fixed_response_ids,
+                beam_width=beam_width)
             print(decode(y[0].tolist()))
             if show_total_probability:
                 total_probability = torch.exp(accumulated_log_prob)
