@@ -313,7 +313,7 @@ class GPT(nn.Module):
                  top_k=None,
                  decode_bytes=None,
                  enable_stop_token=False,
-                 forced_response_ids=None,
+                 fixed_response_ids=None,
                  image_filename=None,
                  show_probs=None):
         """
@@ -339,9 +339,9 @@ class GPT(nn.Module):
 
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)
-            if forced_response_ids is not None:
-                idx_next = forced_response_ids[:,0:1]
-                forced_response_ids = forced_response_ids[:,1:]
+            if fixed_response_ids is not None:
+                idx_next = fixed_response_ids[:, 0:1]
+                fixed_response_ids = fixed_response_ids[:, 1:]
 
             # debug(f"remaining: {  forced_response_ids.numel() if forced_response_ids is not None else (max_new_tokens-token_num)}")
             # debug(f"forced_response_ids: {forced_response_ids}")
@@ -378,7 +378,7 @@ class GPT(nn.Module):
                 if stop_check == [b'\\', b'n', b'",' ]:
                     # debug(f"stopping!")
                     break
-            if forced_response_ids is not None and forced_response_ids.numel() == 0:
+            if fixed_response_ids is not None and fixed_response_ids.numel() == 0:
                 break
         return (idx, accumulated_log_prob)
 

@@ -36,6 +36,76 @@ exec(open('configurator.py').read()) # overrides from command line or config fil
 def to_encoded_tensor(x):
     return (torch.tensor(encode(x), dtype=torch.long, device=device)[None, ...])
 
+def eval(eval_data_file=None, ):
+    global max_new_tokens, k
+    with open(eval_data_file, 'r') as file:
+        eval_data = json.load(file)
+
+    # run generation
+    answer_correct = 0
+    calculator_present = 0
+    normalized_perplexity_total = torch.tensor(0)
+
+    num_requests = 0
+    with torch.no_grad():
+        with ctx:
+            for prompt_pair in eval_data:
+                # Make sure the prompt always ends in whitespace. The model is _really_ picky about whitespace.
+                prompt = prompt_pair["prompt"] + " "
+                response = prompt_pair["response"]
+                if enable_response_start_token:
+                    response = "\n        \"response\":\"" + response
+                else:
+                    # Fix response - it always starts with a space.
+                    if not response.startswith(" "):
+                        response = " " + response
+                print(f"BEGIN ***{prompt}***")
+                x = to_encoded_tensor(prompt)
+                forced_response_ids = to_encoded_tensor(response)
+                max_new_tokens = len(response)
+                if not use_eval_response:
+                    forced_response_ids = None
+                debug(f"forced_response = {forced_response_ids}")
+                for k in range(num_samples):
+                    y, accumulated_log_prob = model.generate(
+                        x,
+                        max_new_tokens,
+                        temperature=temperature,
+                        top_k=top_k,
+                        decode_bytes=decode_bytes,
+                        show_probs=show_probs,
+                        enable_stop_token=enable_stop_token,
+                        fixed_response_ids=forced_response_ids)
+                    decoded = decode(y[0].tolist())
+                    combined = "".join(decoded)
+                    if prompt_pair["expected_value"] in combined:
+                        answer_correct += 1
+                        debug("correct answer")
+                    else:
+                        debug("wrong answer!")
+                    if re.search(r"<<.*>>", combined, flags=re.MULTILINE):
+                        calculator_present += 1
+                        debug("Calculator Present")
+                    else:
+                        debug("Calculator Not Present")
+                    print("***" + decoded + "***")
+
+                    normalized_perplexity_total = torch.add(torch.div(accumulated_log_prob, len(y[0])),
+                                                            normalized_perplexity_total)
+                    num_requests += 1
+                    if show_total_probability:
+                        total_probability = torch.exp(accumulated_log_prob)
+                        print(f"Log Probability: {accumulated_log_prob[0, 0]}")
+                        print(f"Total Probability: {total_probability[0, 0]}")
+                    print('---------------')
+                debug(f"END {prompt}")
+
+    perplexity_average = torch.div(normalized_perplexity_total, torch.tensor(num_requests))
+    perplexity_average = torch.exp(perplexity_average)
+    print(f"Average perplexity: {perplexity_average[0, 0]}")
+    print(f"P(Correct Answer Present): {answer_correct / num_requests}")
+    print(f"P(Calculator Used): {calculator_present / num_requests}")
+
 set_debug_flag(enable_debug)
 
 torch.manual_seed(seed)
@@ -90,69 +160,4 @@ else:
     decode = lambda l: enc.decode(l)
     decode_bytes = lambda l: enc.decode_tokens_bytes(l)
 
-with open(eval_data_file, 'r') as file:
-    eval_data = json.load(file)
-
-# run generation
-answer_correct=0
-calculator_present=0
-normalized_perplexity_total = torch.tensor(0)
-
-num_requests = 0
-with torch.no_grad():
-    with ctx:
-        for prompt_pair in eval_data:
-            # Make sure the prompt always ends in whitespace. The model is _really_ picky about whitespace.
-            prompt = prompt_pair["prompt"] + " "
-            response = prompt_pair["response"]
-            if enable_response_start_token:
-                response = "\n        \"response\":\"" + response
-            else:
-                # Fix response - it always starts with a space.
-                if not response.startswith(" "):
-                    response = " " + response
-            print(f"BEGIN ***{prompt}***")
-            x = to_encoded_tensor(prompt)
-            forced_response_ids = to_encoded_tensor(response)
-            max_new_tokens = len(response)
-            if not use_eval_response:
-                forced_response_ids = None
-            debug(f"forced_response = {forced_response_ids}")
-            for k in range(num_samples):
-                y, accumulated_log_prob = model.generate(
-                    x,
-                    max_new_tokens,
-                    temperature=temperature,
-                    top_k=top_k,
-                    decode_bytes=decode_bytes,
-                    show_probs=show_probs,
-                    enable_stop_token=enable_stop_token,
-                    forced_response_ids=forced_response_ids)
-                decoded = decode(y[0].tolist())
-                combined = "".join(decoded)
-                if prompt_pair["expected_value"] in combined:
-                    answer_correct += 1
-                    debug("correct answer")
-                else:
-                    debug("wrong answer!")
-                if re.search(r"<<.*>>", combined, flags=re.MULTILINE):
-                    calculator_present+=1
-                    debug("Calculator Present")
-                else:
-                    debug("Calculator Not Present")
-                print("***"+decoded+"***")
-
-                normalized_perplexity_total = torch.add(torch.div(accumulated_log_prob, len(y[0])), normalized_perplexity_total)
-                num_requests+=1
-                if show_total_probability:
-                    total_probability = torch.exp(accumulated_log_prob)
-                    print(f"Log Probability: {accumulated_log_prob[0,0]}")
-                    print(f"Total Probability: {total_probability[0,0]}")
-                print('---------------')
-            debug(f"END {prompt}")
-
-perplexity_average = torch.div(normalized_perplexity_total, torch.tensor(num_requests))
-perplexity_average = torch.exp(perplexity_average)
-print(f"Average perplexity: {perplexity_average[0,0]}")
-print(f"P(Correct Answer Present): {answer_correct/num_requests}")
-print(f"P(Calculator Used): {calculator_present/num_requests}")
+eval(eval_data_file=eval_data_file)

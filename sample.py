@@ -24,7 +24,7 @@ compile = False # use PyTorch 2.0 to compile the model to be faster
 show_probs = False # use matplotlib to render charts of the top10 tokens
 image_filename = "token_probability" # Prefix used to name the image files.
 show_total_probability = False # accumulate the total probability of the response.
-forced_response = "" # String that we want to force the model to return - takes the string and pretends it is what was selected.
+fixed_response = "" # String that we want to force the model to return - takes the string and pretends it is what was selected.
 enable_debug = False
 exec(open('configurator.py').read()) # overrides from command line or config file
 # -----------------------------------------------------------------------------
@@ -90,15 +90,15 @@ if start.startswith('FILE:'):
 start_ids = encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
-forced_response_ids = None
-if len(forced_response) > 0 :
+fixed_response_ids = None
+if len(fixed_response) > 0 :
     # Tokens are <whitespace><text>, whitespace isn't independent. I guess this keeps " pod" separate from
     # the "pod ".
     # The configurator requires the types to match, and doesn't coerce string to values set to None.
     # Sanity requires "non-presence" to be None, not default length. Convert it back.
-    forced_response_ids = (torch.tensor(encode(forced_response), dtype=torch.long, device=device)[None, ...])
+    fixed_response_ids = (torch.tensor(encode(fixed_response), dtype=torch.long, device=device)[None, ...])
 
-debug(f"forced_response = {forced_response_ids}")
+debug(f"forced_response = {fixed_response_ids}")
 
 # run generation
 with torch.no_grad():
@@ -112,7 +112,7 @@ with torch.no_grad():
                 decode_bytes=decode_bytes,
                 show_probs=show_probs,
                 image_filename=image_filename,
-                forced_response_ids=forced_response_ids)
+                fixed_response_ids=fixed_response_ids)
             print(decode(y[0].tolist()))
             if show_total_probability:
                 total_probability = torch.exp(accumulated_log_prob)
