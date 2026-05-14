@@ -4,7 +4,7 @@
 
 
 task1_example:
-	python sample.py --init_from=gpt2-large --num_samples=1 --device=mps --max_new_tokens=3 --show_probs=True --image_filename=task1_example --start="I live in" --enable_debug=True
+	python sample.py --init_from=gpt2-large --num_samples=1 --device=mps --max_new_tokens=3 --show_probs=True --image_filename=task1_example --start="I live in" 
 
 
 task2_temperature:

@@ -95,14 +95,14 @@ def eval(eval_data_file=None, ):
                     num_requests += 1
                     if show_total_probability:
                         total_probability = torch.exp(accumulated_log_prob)
-                        print(f"Log Probability: {accumulated_log_prob[0, 0]}")
-                        print(f"Total Probability: {total_probability[0, 0]}")
+                        print(f"Log Probability: {accumulated_log_prob.item()}")
+                        print(f"Total Probability: {total_probability.item()}")
                     print('---------------')
                 debug(f"END {prompt}")
 
     perplexity_average = torch.div(normalized_perplexity_total, torch.tensor(num_requests))
     perplexity_average = torch.exp(torch.neg(perplexity_average))
-    print(f"Average perplexity: {perplexity_average[0, 0]}")
+    print(f"Average perplexity: {perplexity_average.item()}")
     print(f"P(Correct Answer Present): {answer_correct / num_requests}")
     print(f"P(Calculator Used): {calculator_present / num_requests}")
 

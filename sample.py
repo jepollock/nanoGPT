@@ -34,6 +34,9 @@ set_debug_flag(enable_debug)
 # We require at least one of beam_count or fixed_response to not be used.
 # fixed_response and a beam search do not make sense together.
 assert(beam_width == 1 or len(fixed_response) == 0)
+# show probs doesn't work if beam_width is > 1 - decode_bytes doesn't work with
+# non-single element tensors
+assert(beam_width == 1 or show_probs == False)
 
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
@@ -121,5 +124,5 @@ with torch.no_grad():
             print(decode(y[0].tolist()))
             if show_total_probability:
                 total_probability = torch.exp(accumulated_log_prob)
-                print(f"Total Probability: {total_probability[0,0]}")
+                print(f"Total Probability: {total_probability.item()}")
             print('---------------')

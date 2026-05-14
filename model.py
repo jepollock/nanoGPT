@@ -9,7 +9,7 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 
 import math
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import matplotlib.pyplot as plt
 
 import torch
@@ -118,10 +118,14 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
-@dataclass
+@dataclass(order=True)
 class ActiveIdx:
+    sort_index: int = field(init=False, repr=False)
     accumulated_log_prob: torch.Tensor
     idx: torch.Tensor
+
+    def __post_init__(self):
+        self.sort_index = self.accumulated_log_prob.item()
 
 class GPT(nn.Module):
 
@@ -341,11 +345,12 @@ class GPT(nn.Module):
         accumulated_log_prob = torch.tensor(0)
         initial_beam = ActiveIdx(accumulated_log_prob=torch.tensor(0), idx=idx)
         # Treat this as if we're looping around from the bottom.
-        next_beams = (initial_beam)
+        next_beams = [initial_beam]
 
         for token_num in range(max_new_tokens):
+            decode_complete = False
             beams_to_expand = next_beams
-            next_beams = ()
+            next_beams = []
             for beam in beams_to_expand:
                 idx = beam.idx
                 accumulated_log_prob = beam.accumulated_log_prob
@@ -372,10 +377,11 @@ class GPT(nn.Module):
                     debug(f"forced_response_ids: {fixed_response_ids}")
 
                 debug(f"idx_next: {idx_next}")
-                debug(f"idx_next: {decode_bytes(idx_next)}")
+                debug(f"idx_next.size(): {idx_next.size()}")
 
                 # Q 1.1 - bar chart.
                 if show_probs:
+                    debug(f"idx_next: {decode_bytes(idx_next)}")
                     top_10, top_10_indices = torch.topk(probs, 10)
                     debug(f"top_10: {top_10}, {top_10_indices}")
                     plot_probs(decode_bytes=decode_bytes, Y=top_10, indices=top_10_indices, chosen_index=idx_next, filename=image_filename, suffix=token_num)
@@ -386,28 +392,48 @@ class GPT(nn.Module):
                 # Obtain the probability of the sampled token, and add to the log_probability
                 debug(f"probs.size = {probs.size()}")
                 selected_prob = probs[0,idx_next]
+                debug(f"selected_prob.size: {selected_prob.size()}")
                 debug(f"selected_prob: {selected_prob}")
                 log_selected_prob = torch.log(selected_prob)
                 debug(f"log_selected_prob: {log_selected_prob}")
                 debug(f"before_accumulated: {accumulated_log_prob}")
-                accumulated_log_prob = torch.add(accumulated_log_prob, log_selected_prob)
-                debug(f"Accumulated log prob={accumulated_log_prob.tolist()}")
 
-                # append sampled index to the running sequence and continue
-                idx = torch.cat((idx, idx_next), dim=1)
-                if enable_stop_token:
-                    # Detect a stop token.
-                    # Encode request->response
-                    # \n        "response": "
-                    # Break on \n",
-                    stop_check = decode_bytes(idx[0].tolist()[-3:])
-                    # debug(f"stop_check = {stop_check}")
-                    if stop_check == [b'\\', b'n', b'",' ]:
-                        # debug(f"stopping!")
-                        break
-                if fixed_response_ids is not None and fixed_response_ids.numel() == 0:
-                    break
-        return (idx, accumulated_log_prob)
+                # Convert the tensor of log_selected_prob and idx_next to the beams
+                for i in range(beam_width):
+                    debug(f"Recording beam {i}")
+                    debug(f"log_selected_prob = {log_selected_prob.size()}")
+                    beam_accumulated_log_prob = torch.add(accumulated_log_prob, log_selected_prob[0,i])
+                    debug(f"Accumulated log prob={beam_accumulated_log_prob}")
+
+                    beam_idx_next = idx_next[:, 0:1]
+                    idx_next = idx_next[:, 1:]
+                    # o.k. cuts aren't working, use the cut from above.
+                    # append sampled index to the running sequence and continue
+                    debug(f"idx dimensions = {idx.size()}")
+                    debug(f"idx_next dimensions = {beam_idx_next.size()}")
+                    debug(f"pruned dimensions = {idx_next.size()}")
+
+                    beam_idx = torch.cat((idx, beam_idx_next), dim=1)
+                    next_beams.append(ActiveIdx(accumulated_log_prob=beam_accumulated_log_prob, idx=beam_idx))
+                    if enable_stop_token:
+                        # Detect a stop token.
+                        # Encode request->response
+                        # \n        "response": "
+                        # Break on \n",
+                        stop_check = decode_bytes(beam_idx[0].tolist()[-3:])
+                        # debug(f"stop_check = {stop_check}")
+                        if stop_check == [b'\\', b'n', b'",' ]:
+                            # debug(f"stopping!")
+                            decode_complete = True
+                    if fixed_response_ids is not None and fixed_response_ids.numel() == 0:
+                        decode_complete = True
+            # sort next_beams, and take the beam_widths with the largest log_probabilities.
+            next_beams = sorted(next_beams)
+            next_beams = next_beams[-beam_width:]
+            if decode_complete:
+                break
+        best_beam = next_beams[-1]
+        return (best_beam.idx, best_beam.accumulated_log_prob)
 
 def plot_probs(decode_bytes=None, filename="token_probability", Y=None, indices=None, chosen_index=None, suffix="x"):
     title = f"GPT Token Probability Graph: {suffix}"
