@@ -119,10 +119,10 @@ class GPTConfig:
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
 @dataclass(order=True)
-class ActiveIdx:
+class Beam:
     sort_index: int = field(init=False, repr=False)
-    accumulated_log_prob: torch.Tensor
-    idx: torch.Tensor
+    accumulated_log_prob: torch.Tensor = field(compare=False)
+    idx: torch.Tensor = field(compare=False)
 
     def __post_init__(self):
         self.sort_index = self.accumulated_log_prob.item()
@@ -333,17 +333,15 @@ class GPT(nn.Module):
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
         # Beam Search:
-        # Need accum log prob per beam
-        # Need sorted list of log_prob -> idx
         # Algorithm:
-        #  Take values => generate idx tokens for each
-        #  sample for beam_count, without replacement.
-        #  Update accum log prob
-        #  Put into potentials
-        #  Take best beam count log_probs (sort, last-n)
-        #  replace initial searches with best beams.
+        #  for each beam in next_beams
+        #    sample for beam_width, without replacement.
+        #    Update accumulated_log_prob
+        #    Put into next_beams
+        #    Take best beam_width log_probs (sort, last-n)
+        #    replace next_beams with best beams.
         accumulated_log_prob = torch.tensor(0)
-        initial_beam = ActiveIdx(accumulated_log_prob=torch.tensor(0), idx=idx)
+        initial_beam = Beam(accumulated_log_prob=torch.tensor(0), idx=idx)
         # Treat this as if we're looping around from the bottom.
         next_beams = [initial_beam]
 
@@ -414,7 +412,7 @@ class GPT(nn.Module):
                     debug(f"pruned dimensions = {idx_next.size()}")
 
                     beam_idx = torch.cat((idx, beam_idx_next), dim=1)
-                    next_beams.append(ActiveIdx(accumulated_log_prob=beam_accumulated_log_prob, idx=beam_idx))
+                    next_beams.append(Beam(accumulated_log_prob=beam_accumulated_log_prob, idx=beam_idx))
                     if enable_stop_token:
                         # Detect a stop token.
                         # Encode request->response

@@ -42,6 +42,11 @@ task8_eval_finetune:
 	python -u ./eval.py --show_total_probability=True --num_samples=1 --init_from=resume --out_dir=out-gms8k --device=mps --eval_data_file=test.json --enable_response_start_token=True --enable_stop_token=True --use_eval_response=False | tee task8_finetune_unfixed_response.txt
 
 
+task9_beam_search:
+	python sample.py --init_from=gpt2-large --num_samples=1 --device=mps --max_new_tokens=3 --start="I live in" --show_total_probability=True | tee task9_beam_search_size1.txt
+	python sample.py --init_from=gpt2-large --num_samples=1 --device=mps --max_new_tokens=3 --start="I live in" --beam_width=5 --show_total_probability=True | tee task9_beam_search_size5.txt
+
+
 clean:
 	rm task1_example*.png
 	rm task2_temp*.png
