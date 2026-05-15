@@ -1,6 +1,11 @@
 # Make the various interim files.
 
-.PHONY: task1_example task2_temperature clean task3_log_prob task4_forced_response
+.PHONY: clean task1_example task2_temperature task3_log_prob task4_fixed_response task5_eval_data task5_dataset task6_prepare_dataset task7_finetune task8_eval_baseline task8_eval_finetune task9_beam_search release
+
+all: task1_example task2_temperature task3_log_prob task4_fixed_response task5_eval_data task5_dataset task6_prepare_dataset task7_finetune task8_eval_baseline task8_eval_finetune task9_beam_search
+
+release:
+	tar -czf pollocjaso_aiml428_asst2.tgz -s ",^,pollocjaso_asst2/," $(NB_SOURCES) $(PDF_TARGETS) makefile 
 
 
 task1_example:
@@ -21,6 +26,12 @@ task4_fixed_response:
 	python sample.py --init_from=gpt2-large --num_samples=1 --device=mps --start="I live in" --show_total_probability=True --fixed_response=" the capital"| tail -3 >> task4_fixed_response.txt
 	python sample.py --init_from=gpt2-large --num_samples=1 --device=mps --start="I live in" --show_total_probability=True --fixed_response=" the capital of"| tail -3 >> task4_fixed_response.txt
 	python sample.py --init_from=gpt2-large --num_samples=1 --device=mps --start="I live in" --show_total_probability=True --fixed_response=" the capital of New Zealand" | tail -3 >> task4_fixed_response.txt
+
+
+task5_eval_data:
+	python convert.py --split=False --max_rows=1 --in_file=data/gms8k/test-00000-of-00001.parquet --train_file=eval_data.json
+	python convert.py --split=False --max_rows=3 --in_file=data/gms8k/test-00000-of-00001.parquet --train_file=report_eval_data.json
+
 
 
 task5_dataset:
