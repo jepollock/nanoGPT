@@ -5,7 +5,8 @@
 all: task1_example task2_temperature task3_log_prob task4_fixed_response task5_eval_data task5_dataset task6_prepare_dataset task7_finetune task8_eval_baseline task8_eval_finetune task9_beam_search
 
 release:
-	tar -czf pollocjaso_aiml428_asst2.tgz -s ",^,pollocjaso_asst2/," $(NB_SOURCES) $(PDF_TARGETS) makefile 
+	cd ../; \
+	tar -czf pollocjaso_aiml428_asst2.tgz --exclude="*.tgz" -s ",^,pollocjaso_asst2/," nanoGPT assignment2.pdf ;
 
 
 task1_example:
